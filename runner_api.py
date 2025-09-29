@@ -8,10 +8,7 @@ import base64
 from io import BytesIO
 
 
-# 2. 构造输入
-instruction = "请点击屏幕上的‘会员’按钮"  # 示例指令
-image_path = "assets/test.jpeg"  # 你的图片路径
-image = Image.open(image_path).convert("RGB")
+
 
 # 3. 将图片长边缩放至1120以降低计算和显存压力
 def __resize__(origin_img):
@@ -28,7 +25,7 @@ def __resize__(origin_img):
             w = max_line
     img = origin_img.resize((w,h),resample=Image.Resampling.LANCZOS)
     return img
-image = __resize__(image)
+
 
 
 def encode_image_to_base64(image):
@@ -36,22 +33,8 @@ def encode_image_to_base64(image):
     image.save(buffered, format="PNG")
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-image_base64 = encode_image_to_base64(image)
 
-# 构造消息格式
-# instruction = "请根据当前屏幕截图判断下一步操作"
-# messages = [{
-#     "role": "user",
-#     "content": [
-#         f"<Question>{instruction}</Question>\n当前屏幕截图：",
-#         {
-#             "type": "image_url",
-#             "image_url": {
-#                 "url": f"data:image/png;base64,{image_base64}"
-#             }
-#         }
-#     ]
-# }]
+
 
 ACTION_SCHEMA = json.load(open('eval/utils/schema/schema.json', encoding="utf-8"))
 ACTION_SCHEMA["required"] = ["thought"]  # 启用 thought 字段
@@ -69,21 +52,23 @@ SYSTEM_PROMPT = f'''# Role
 # Schema
 {json.dumps(ACTION_SCHEMA, indent=None, ensure_ascii=False, separators=(',', ':'))}'''
 
+def query_ollama(image_base64, instruction:str):
 
-import requests
-
-response = requests.post(
-    # "http://localhost:11434/api/chat",
-    url="http://localhost:11434/v1/chat/completions",
-    headers={"Content-Type": "application/json"},
-    json={
+    url = "http://localhost:11434/v1/chat/completions"
+    headers = {
+        "Content-Type": "application/json"
+    }
+    data = {
         "model": "agentcpm:latest",
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": f"<Question>{instruction}</Question>\n当前屏幕截图：",},
+                    {
+                        "type": "text",
+                        "text": f"<Question>{instruction}</Question>\n当前屏幕截图：",
+                    },
                     {
                         "type": "image_url",
                         "image_url": f"data:image/png;base64,{image_base64}",
@@ -92,8 +77,35 @@ response = requests.post(
             },
         ],
         "stream": False,
-    },
-)
+    }
+    try:
+        response = requests.post(url, headers=headers, json=data)
+        response.raise_for_status()
+        content = response.content
+        encodings = ['utf-8', 'ascii', 'latin1']
+        for encoding in encodings:
+            try:
+                decoded_content = content.decode(encoding)
+                return json.loads(decoded_content)
+            except UnicodeDecodeError:
+                continue
+            except json.JSONDecodeError:
+                continue
+        return None
+    except requests.exceptions.RequestException as e:
+        return None
 
-# 输出结果
-print(response.json())
+    # 输出结果
+    return(response.json())
+    # {'id': 'chatcmpl-361', 'object': 'chat.completion', 'created': 1759130533, 'model': 'agentcpm:latest', 'system_fingerprint': 'fp_ollama', 'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': '{"thought":"目标是点击屏幕上的‘会员’按钮。目前界面显示了音乐应用的推荐页面，‘会员’按钮位于顶部导航栏中。点击‘会员’按钮可以访问应用的会员专属页面。","POINT":[729,69]}'}, 'finish_reason': 'stop'}], 'usage': {'prompt_tokens': 657, 'completion_tokens': 57, 'total_tokens': 714}}
+if __name__ == "__main__":
+    from rich import print
+    # 构造输入
+    instruction = "请点击屏幕上的‘会员’按钮"  # 示例指令
+    image_path = "assets/test.jpeg"  # 你的图片路径
+    image = Image.open(image_path).convert("RGB")
+    image = __resize__(image)
+    image_base64 = encode_image_to_base64(image)
+
+    result = query_ollama(image_base64, instruction)
+    print(result)

@@ -6,11 +6,10 @@ from PIL import Image
 import json
 import base64
 from io import BytesIO
+from mark_coordinates import mark_coordinates
 
 
-
-
-# 3. 将图片长边缩放至1120以降低计算和显存压力
+# 将图片长边缩放至1120以降低计算和显存压力
 def __resize__(origin_img):
     resolution = origin_img.size
     w,h = resolution
@@ -43,7 +42,7 @@ SYSTEM_PROMPT = f'''# Role
 你是一名熟悉安卓系统触屏GUI操作的智能体，将根据用户的问题，分析当前界面的GUI元素和布局，生成相应的操作。
 
 # Task
-针对用户问题，根据输入的当前屏幕截图，输出下一步的操作。
+针对用户问题，根据输入的当前屏幕截图，输出下1~3步的操作。
 
 # Rule
 - 以紧凑JSON格式输出
@@ -86,6 +85,7 @@ def query_ollama(image_base64, instruction:str):
         for encoding in encodings:
             try:
                 decoded_content = content.decode(encoding)
+                # 输出结果
                 return json.loads(decoded_content)
             except UnicodeDecodeError:
                 continue
@@ -95,13 +95,31 @@ def query_ollama(image_base64, instruction:str):
     except requests.exceptions.RequestException as e:
         return None
 
-    # 输出结果
-    return(response.json())
+   
     # {'id': 'chatcmpl-361', 'object': 'chat.completion', 'created': 1759130533, 'model': 'agentcpm:latest', 'system_fingerprint': 'fp_ollama', 'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': '{"thought":"目标是点击屏幕上的‘会员’按钮。目前界面显示了音乐应用的推荐页面，‘会员’按钮位于顶部导航栏中。点击‘会员’按钮可以访问应用的会员专属页面。","POINT":[729,69]}'}, 'finish_reason': 'stop'}], 'usage': {'prompt_tokens': 657, 'completion_tokens': 57, 'total_tokens': 714}}
+
+def visualize_result(model_result: dict, output_dir="./marked_images/"):
+    for res in model_result['choices']:
+        _res = json.loads(res['message']['content'])
+        # x = 
+        marked_image_path = mark_coordinates(
+            image_path=image_path,
+            x=731,  # Center horizontally (0-1000 scale)
+            y=69,  # Slightly above center vertically (0-1000 scale)
+            output_dir=output_dir,
+            marker_color=(255, 0, 0),  # Red color
+            marker_size=20,  # 20 pixels
+            marker_type='circle',  # Circle marker
+            filename_suffix='_red_circle'
+        )
+    
+    print(f"Marked image saved to: {marked_image_path}")
+
 if __name__ == "__main__":
     from rich import print
     # 构造输入
-    instruction = "请点击屏幕上的‘会员’按钮"  # 示例指令
+    # instruction = "请点击屏幕上的‘会员’按钮"  # 示例指令
+    instruction = "请帮我搜索周杰伦的歌"
     image_path = "assets/test.jpeg"  # 你的图片路径
     image = Image.open(image_path).convert("RGB")
     image = __resize__(image)

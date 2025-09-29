@@ -1,0 +1,17 @@
+FROM model\AgentCPM-GUI\mmproj-model-f16.gguf
+FROM model\AgentCPM-GUI\model\Model-7.6B-F16.gguf
+
+TEMPLATE """{{ if .System }}<|im_start|>system
+ 
+{{ .System }}<|im_end|>{{ end }}
+ 
+{{ if .Prompt }}<|im_start|>user
+ 
+{{ .Prompt }}<|im_end|>{{ end }}
+ 
+<|im_start|>assistant<|im_end|>
+ 
+{{ .Response }}<|im_end|>"""
+ 
+PARAMETER stop "<|endoftext|>"
+PARAMETER stop "<|im_end|>"

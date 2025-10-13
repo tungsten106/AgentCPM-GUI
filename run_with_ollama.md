@@ -1,3 +1,17 @@
+# 使用ollama在cpu上运行AgentCPM-GUI
+
+## 模型下载
+模型地址：
+环境：
+```
+pip install huggingface_hub
+```
+
+命令行模型下载：
+```
+huggingface-cli download openbmb/AgentCPM-GUI --local-dir ./model/AgentCPM-GUI
+```
+
 ## ollama部署
 安装ollama.exe: https://ollama.com/download
 
@@ -29,9 +43,19 @@ python ./tools/mtmd/legacy-models/minicpmv-convert-image-encoder-to-gguf.py -m .
 python .\convert_hf_to_gguf.py ../AgentCPM-GUI\model\AgentCPM-GUI\model
 ```
 
-如果出现 `trust_remote_code=True` 的报错，修改convert_hf_to_gguf.py, line 457: 
+有可能出现 `trust_remote_code=True` 的报错，如下：
+```
+...
+ValueError: The repository for ..\AgentCPM-GUI\model\AgentCPM-GUI\model contains custom code which must be executed to correctly load the model. You can inspect the repository content at https://hf.co/..\AgentCPM-GUI\model\AgentCPM-GUI\model.
+Please pass the argument `trust_remote_code=True` to allow custom code to be run.
+```
+
+Solution: 修改convert_hf_to_gguf.py: line 457, line 637: 
 ```python
-config = AutoConfig.from_pretrained(dir_model, trust_remote_code=False).to_dict()
+# line 457
+config = AutoConfig.from_pretrained(dir_model, trust_remote_code=True).to_dict()
+# line 637
+tokenizer = AutoTokenizer.from_pretrained(self.dir_model, trust_remote_code=True)
 ```
 
 # ollama创建模型

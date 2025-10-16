@@ -11,6 +11,7 @@ UIAutomator Controller with AgentCPM-GUI
 - 根据模型输出执行点击、滑动、输入文本等操作
 - 支持特殊按键操作（HOME、BACK、ENTER）
 - 支持任务状态跟踪和反馈
+- 支持多轮对话，保留历史对话上下文
 
 前提条件:
 - Python 3.8+
@@ -29,7 +30,7 @@ UIAutomator Controller with AgentCPM-GUI
    python uiautomator_controller.py --task "打开微信并发送一条消息给张三"
 
 2. 高级选项:
-   python uiautomator_controller.py --device DEVICE_ID --model /path/to/model --device-gpu cuda:0 --task "打开设置并开启飞行模式" --max-steps 15
+   python uiautomator_controller.py --device DEVICE_ID --model /path/to/model --device-gpu cuda:0 --task "打开设置并开启飞行模式" --max-steps 15 --reset-history
 
 参数说明:
 - --device: 设备 ID，如果有多个设备连接，需要指定
@@ -37,6 +38,7 @@ UIAutomator Controller with AgentCPM-GUI
 - --device-gpu: 使用的 GPU 设备，默认为 "cuda:0"
 - --task: 要执行的任务指令（必需）
 - --max-steps: 最大执行步数，默认为 10
+- --reset-history: 重置对话历史，开始新的对话
 
 故障排除:
 1. 设备连接问题:
@@ -118,9 +120,13 @@ class AgentCPMController:
 # Rule
 - 以紧凑JSON格式输出
 - 输出操作必须遵循Schema约束
+- 你可以参考历史对话来理解当前任务的上下文
 
 # Schema
 {json.dumps(self.action_schema, indent=None, ensure_ascii=False, separators=(',', ':'))}'''
+
+        # 初始化对话历史
+        self.conversation_history = []
 
     def get_action(self, image, instruction):
         """
@@ -134,7 +140,24 @@ class AgentCPMController:
         try:
             # 推理
             outputs = self.query_ollama(image_base64, instruction)
-            action = json.loads(outputs['choices'][-1]['message']['content'])
+            action_content = outputs['choices'][-1]['message']['content']
+            action = json.loads(action_content)
+            
+            # 更新对话历史
+            # 添加用户消息到历史记录
+            user_message = {
+                "role": "user",
+                "content": f"<Question>{instruction}</Question>\n当前屏幕截图：[图片]"
+            }
+            self.conversation_history.append(user_message)
+            
+            # 添加助手回复到历史记录
+            assistant_message = {
+                "role": "assistant",
+                "content": action_content
+            }
+            self.conversation_history.append(assistant_message)
+            
             return action
         except Exception as e:
             print("Error parsing model!")
@@ -142,31 +165,40 @@ class AgentCPMController:
             return None
     
     def query_ollama(self, image_base64, instruction:str):
-
         url = "http://localhost:11434/v1/chat/completions"
         headers = {
             "Content-Type": "application/json"
         }
-        data = {
-            "model": "agentcpm:latest",
-            "messages": [
-                {"role": "system", "content": self.system_prompt},
+        
+        # 构建消息列表，包含系统提示和历史对话
+        messages = [{"role": "system", "content": self.system_prompt}]
+        
+        # 添加历史对话（不包含当前请求）
+        if self.conversation_history:
+            messages.extend(self.conversation_history)
+        
+        # 添加当前用户消息（包含当前截图）
+        current_message = {
+            "role": "user",
+            "content": [
                 {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": f"<Question>{instruction}</Question>\n当前屏幕截图：",
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": f"data:image/png;base64,{image_base64}",
-                        },
-                    ],
+                    "type": "text",
+                    "text": f"<Question>{instruction}</Question>\n当前屏幕截图：",
+                },
+                {
+                    "type": "image_url",
+                    "image_url": f"data:image/png;base64,{image_base64}",
                 },
             ],
+        }
+        messages.append(current_message)
+        
+        data = {
+            "model": "agentcpm:latest",
+            "messages": messages,
             "stream": False,
         }
+        
         try:
             response = requests.post(url, headers=headers, json=data)
             response.raise_for_status()
@@ -183,6 +215,7 @@ class AgentCPMController:
                     continue
             return None
         except requests.exceptions.RequestException as e:
+            print(f"Request error: {e}")
             return None
 
 class UIAutomatorController:
@@ -289,11 +322,17 @@ def main():
     parser.add_argument("--device-gpu", type=str, help="GPU device to use", default="cuda:0")
     parser.add_argument("--task", type=str, help="Task instruction", required=True)
     parser.add_argument("--max-steps", type=int, help="Maximum number of steps", default=10)
+    parser.add_argument("--reset-history", action="store_true", help="Reset conversation history")
     args = parser.parse_args()
     
     # 初始化控制器
     ui_controller = UIAutomatorController(args.device)
     agent_controller = AgentCPMController(args.model, args.device_gpu)
+    
+    # 如果指定了重置历史，则清空历史记录
+    if args.reset_history:
+        agent_controller.conversation_history = []
+        print("Conversation history has been reset.")
     
     # 执行任务
     instruction = args.task
@@ -342,6 +381,17 @@ def main():
         print(f"Reached maximum number of steps ({args.max_steps})")
     
     print("Task execution finished")
+    
+    # 打印对话历史长度
+    print(f"Conversation history length: {len(agent_controller.conversation_history)} messages")
+    
+    # 询问是否要保存对话历史
+    save_history = input("Do you want to save the conversation history? (y/n): ")
+    if save_history.lower() == 'y':
+        history_file = f"conversation_history_{int(time.time())}.json"
+        with open(history_file, 'w', encoding='utf-8') as f:
+            json.dump(agent_controller.conversation_history, f, ensure_ascii=False, indent=2)
+        print(f"Conversation history saved to {history_file}")
 
 if __name__ == "__main__":
     main()
